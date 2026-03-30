@@ -1,6 +1,54 @@
 {
   "lockfile_version": "1",
   "packages": {
+    "cargo-deny@latest": {
+      "last_modified": "2026-03-21T07:29:51Z",
+      "resolved": "github:NixOS/nixpkgs/09061f748ee21f68a089cd5d91ec1859cd93d0be#cargo-deny",
+      "source": "devbox-search",
+      "version": "0.19.0",
+      "systems": {
+        "aarch64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/8inpv1vrra2p1k2pk4iibg4fkvdcqq01-cargo-deny-0.19.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/8inpv1vrra2p1k2pk4iibg4fkvdcqq01-cargo-deny-0.19.0"
+        },
+        "aarch64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/2snxa59zcr67077lj17ypm2kr1m25x37-cargo-deny-0.19.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/2snxa59zcr67077lj17ypm2kr1m25x37-cargo-deny-0.19.0"
+        },
+        "x86_64-darwin": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/hrs67v5sva8n15nfqlmv4bwfgnm3s6qf-cargo-deny-0.19.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/hrs67v5sva8n15nfqlmv4bwfgnm3s6qf-cargo-deny-0.19.0"
+        },
+        "x86_64-linux": {
+          "outputs": [
+            {
+              "name": "out",
+              "path": "/nix/store/xqnwl8qppzhr3dq5nzw2ly6yx4lz9xyr-cargo-deny-0.19.0",
+              "default": true
+            }
+          ],
+          "store_path": "/nix/store/xqnwl8qppzhr3dq5nzw2ly6yx4lz9xyr-cargo-deny-0.19.0"
+        }
+      }
+    },
     "github:NixOS/nixpkgs/nixpkgs-unstable": {
       "last_modified": "2026-03-18T13:30:56Z",
       "resolved": "github:NixOS/nixpkgs/9cf7092bdd603554bd8b63c216e8943cf9b12512?lastModified=1773840656&narHash=sha256-9tpvMGFteZnd3gRQZFlRCohVpqooygFuy9yjuyRL2C0%3D"
