@@ -2,10 +2,15 @@
   "$schema": "https://raw.githubusercontent.com/jetify-com/devbox/0.17.0/.schema/devbox.schema.json",
   "packages": {
     "cargo-deny": "latest",
+    "pre-commit": "latest",
     "rustup": "latest"
   },
   "shell": {
-    "init_hook": ["rustup toolchain install", "cargo fetch"],
+    "init_hook": [
+      "rustup toolchain install",
+      "cargo fetch",
+      "pre-commit install"
+    ],
     "scripts": {}
   }
 }
