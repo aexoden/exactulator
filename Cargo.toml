@@ -1,0 +1,19 @@
+[package]
+name = "exactulator"
+version = "0.1.0"
+edition = "2024"
+description = "A calculator that provides exact results for mathematical expressions."
+repository = "https://github.com/aexoden/exactulator"
+license = "MIT OR Apache-2.0"
+keywords = ["arithmetic", "calculator", "exact", "math"]
+categories = ["command-line-utilities", "mathematics"]
+
+[dependencies]
+
+[lints.clippy]
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+[lints.rust]
+let_underscore = { level = "warn", priority = -1 }
