@@ -47,3 +47,10 @@ repos:
         entry: cargo test --workspace --all-features
         language: system
         pass_filenames: false
+
+      - id: cargo-deny
+        name: cargo-deny
+        description: Check Rust dependencies for security vulnerabilities using cargo-deny
+        entry: cargo deny check
+        language: system
+        pass_filenames: false
