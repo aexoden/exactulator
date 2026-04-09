@@ -1,0 +1,19 @@
+name: Security Audit
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight
+  workflow_dispatch:
+
+jobs:
+  cargo-deny:
+    name: Run cargo-deny advisory check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Run cargo-deny advisory check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories
