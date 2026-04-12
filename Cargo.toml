@@ -9,6 +9,7 @@ keywords = ["arithmetic", "calculator", "exact", "math"]
 categories = ["command-line-utilities", "mathematics"]
 
 [dependencies]
+iced = "=0.14.0"
 
 [lints.clippy]
 absolute_paths = "warn"

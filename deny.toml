@@ -1,2 +1,20 @@
+[advisories]
+ignore = [
+  { id = "RUSTSEC-2024-0436", reason = "The `paste` crate is unmaintained, but is a transitive dependency at this time." }
+]
+
+[bans]
+multiple-versions = "allow"
+
 [licenses]
-allow = ["Apache-2.0", "MIT"]
+allow = [
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "BSL-1.0",
+  "CC0-1.0",
+  "ISC",
+  "MIT",
+  "Unicode-3.0",
+  "Zlib"
+]
