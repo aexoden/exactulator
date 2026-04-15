@@ -483,3 +483,481 @@ pub fn run() -> iced::Result {
         .window_size((380.0, 600.0))
         .run()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    //
+    // Helper functions
+    //
+
+    /// Converts a string of digits and `.` into a sequence of messages.
+    fn input(s: &str) -> Vec<Message> {
+        s.chars()
+            .map(|c| match c {
+                '.' => Message::Decimal,
+                '0'..='9' => Message::Digit(c),
+                _ => panic!("invalid character in input: {c}"),
+            })
+            .collect()
+    }
+
+    /// Runs a sequence of messages through a fresh `App` and returns it.
+    fn run_app(messages: &[Message]) -> App {
+        let mut app = App::default();
+        for &msg in messages {
+            app.update(msg);
+        }
+        app
+    }
+
+    /// Runs a sequence of messages and returns the display string.
+    fn eval(messages: &[Message]) -> String {
+        run_app(messages).display_value()
+    }
+
+    /// Builds a binary operation (left op right =) and returns the display string.
+    fn simple_binop(left: &str, op: Operator, right: &str) -> String {
+        let mut msgs: Vec<Message> = input(left);
+        msgs.push(Message::Operator(op));
+        msgs.extend(input(right));
+        msgs.push(Message::Equals);
+        eval(&msgs)
+    }
+
+    fn rational(num: i64, den: i64) -> BigRational {
+        BigRational::new(num.into(), den.into())
+    }
+
+    //
+    // format_rational
+    //
+
+    #[test]
+    fn format_rational_zero() {
+        assert_eq!(format_rational(&rational(0, 1)), "0");
+    }
+
+    #[test]
+    fn format_rational_integer() {
+        assert_eq!(format_rational(&rational(42, 1)), "42");
+    }
+
+    #[test]
+    fn format_rational_negative_integer() {
+        assert_eq!(format_rational(&rational(-7, 1)), "\u{2212}7");
+    }
+
+    // TODO: Update this test once repeating decimal format is determined
+    #[test]
+    fn format_rational_repeating_fraction() {
+        let s = format_rational(&rational(1, 3));
+        assert!(s.starts_with("0."), "expected decimal, got {s}");
+    }
+
+    //
+    // apply_operator (pure function tests with unique values from integration tests)
+    //
+
+    #[test]
+    fn apply_operator_basic_cases() {
+        #[expect(
+            clippy::type_complexity,
+            reason = "tuple of test cases (left, operator, right, expected)"
+        )]
+        let cases: &[(i64, Operator, i64, Option<(i64, i64)>)] = &[
+            (3, Operator::Add, 4, Some((7, 1))),
+            (10, Operator::Subtract, 7, Some((3, 1))),
+            (8, Operator::Multiply, 9, Some((72, 1))),
+            (10, Operator::Divide, 4, Some((5, 2))),
+            (1, Operator::Divide, 0, None),
+        ];
+
+        for &(l, op, r, expected) in cases {
+            let result = App::apply_operator(rational(l, 1), op, rational(r, 1));
+            match expected {
+                Some((num, den)) => {
+                    assert_eq!(
+                        result.unwrap(),
+                        rational(num, den),
+                        "{l} {op} {r} should be {num}/{den}"
+                    );
+                }
+                None => assert!(result.is_err(), "{l} {op} {r} should be an error"),
+            }
+        }
+    }
+
+    #[test]
+    fn apply_operator_exact_fraction_addition() {
+        let result = App::apply_operator(rational(1, 3), Operator::Add, rational(1, 6)).unwrap();
+        assert_eq!(result, rational(1, 2));
+    }
+
+    //
+    // Arithmetic integration tests (through the UI message pipeline)
+    //
+
+    #[test]
+    fn arithmetic_basic_operations() {
+        let cases: &[(&str, Operator, &str, &str)] = &[
+            ("2", Operator::Add, "3", "5"),
+            ("2.5", Operator::Add, "3.12", "5.62"),
+            ("9", Operator::Subtract, "4", "5"),
+            ("6", Operator::Multiply, "7", "42"),
+            ("2.5", Operator::Multiply, "3.1", "7.75"),
+            ("10", Operator::Divide, "2", "5"),
+            ("1", Operator::Divide, "4", "0.25"),
+            ("5", Operator::Divide, "0", "Error"),
+        ];
+
+        for &(left, op, right, expected) in cases {
+            assert_eq!(
+                simple_binop(left, op, right),
+                expected,
+                "{left} {op} {right} should be {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn arithmetic_with_negated_input() {
+        let mut msgs = input("15");
+        msgs.push(Message::Negate);
+        msgs.push(Message::Operator(Operator::Add));
+        msgs.extend(input("5"));
+        msgs.push(Message::Equals);
+        assert_eq!(eval(&msgs), "\u{2212}10");
+    }
+
+    // TODO: This test should be updated once we determine the behavior for repeating decimals
+    #[test]
+    fn division_repeating() {
+        let result = simple_binop("1", Operator::Divide, "3");
+        assert!(result.starts_with("0."), "expected decimal, got {result}");
+        assert!(result.contains('3'), "expected repeating 3s, got {result}");
+    }
+
+    //
+    // Input tests
+    //
+
+    #[test]
+    fn multi_digit_input() {
+        assert_eq!(eval(&input("123")), "123");
+    }
+
+    #[test]
+    fn decimal_input() {
+        assert_eq!(eval(&input("1.5")), "1.5");
+    }
+
+    #[test]
+    fn leading_decimal_input() {
+        assert_eq!(eval(&input(".5")), "0.5");
+    }
+
+    #[test]
+    fn duplicate_decimal_ignored() {
+        assert_eq!(eval(&input("1.2.3")), "1.23");
+    }
+
+    #[test]
+    fn leading_zero_replaced_by_digit() {
+        assert_eq!(eval(&input("05")), "5");
+    }
+
+    #[test]
+    fn invalid_digit_ignored() {
+        let msgs = vec![
+            Message::Digit('1'),
+            Message::Digit('x'),
+            Message::Digit('2'),
+        ];
+        assert_eq!(eval(&msgs), "12");
+    }
+
+    //
+    // Negation
+    //
+
+    #[test]
+    fn negate_positive_input() {
+        let mut msgs = input("5");
+        msgs.push(Message::Negate);
+        assert_eq!(eval(&msgs), "\u{2212}5");
+    }
+
+    #[test]
+    fn negate_result() {
+        let mut msgs = input("3");
+        msgs.push(Message::Operator(Operator::Add));
+        msgs.extend(input("4"));
+        msgs.push(Message::Equals);
+        msgs.push(Message::Negate);
+        assert_eq!(eval(&msgs), "\u{2212}7");
+    }
+
+    #[test]
+    fn double_negate_cancels() {
+        let mut msgs = input("5");
+        msgs.push(Message::Negate);
+        msgs.push(Message::Negate);
+        assert_eq!(eval(&msgs), "5");
+    }
+
+    #[test]
+    fn negate_zero_is_noop() {
+        let mut msgs = input("0");
+        msgs.push(Message::Negate);
+        assert_eq!(eval(&msgs), "0");
+    }
+
+    #[test]
+    fn negate_empty_input() {
+        let msgs = vec![Message::Negate];
+        assert_eq!(eval(&msgs), "\u{2212}");
+    }
+
+    //
+    // Clear
+    //
+
+    #[test]
+    fn clear_resets_everything() {
+        let mut msgs = input("5");
+        msgs.push(Message::Operator(Operator::Add));
+        msgs.extend(input("3"));
+        msgs.push(Message::Clear);
+        assert_eq!(eval(&msgs), "");
+    }
+
+    #[test]
+    fn clear_entry_only_resets_current_input() {
+        let mut msgs = input("5");
+        msgs.push(Message::Operator(Operator::Add));
+        msgs.push(Message::Digit('3'));
+        msgs.push(Message::ClearEntry);
+        msgs.push(Message::Digit('7'));
+        msgs.push(Message::Equals);
+        assert_eq!(eval(&msgs), "12");
+    }
+
+    #[test]
+    fn clear_entry_on_result_resets_display() {
+        let app = run_app(&[
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+            Message::ClearEntry,
+        ]);
+        assert_eq!(app.display_value(), "");
+    }
+
+    //
+    // Chained operations
+    //
+
+    #[test]
+    fn chained_addition() {
+        let msgs = vec![
+            Message::Digit('1'),
+            Message::Operator(Operator::Add),
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+        ];
+        assert_eq!(eval(&msgs), "6");
+    }
+
+    #[test]
+    fn chained_mixed_operators() {
+        // 2 + 3 × 4 = should evaluate left-to-right: (2+3)×4 = 20
+        let msgs = vec![
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Operator(Operator::Multiply),
+            Message::Digit('4'),
+            Message::Equals,
+        ];
+        assert_eq!(eval(&msgs), "20");
+    }
+
+    #[test]
+    fn operator_change() {
+        let msgs = vec![
+            Message::Digit('5'),
+            Message::Operator(Operator::Add),
+            Message::Operator(Operator::Subtract),
+            Message::Digit('3'),
+            Message::Equals,
+        ];
+        assert_eq!(eval(&msgs), "2");
+    }
+
+    #[test]
+    fn result_used_as_left_operand() {
+        // 2 + 3 = 5, then × 4 = should give 20
+        let app = run_app(&[
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+            Message::Operator(Operator::Multiply),
+            Message::Digit('4'),
+            Message::Equals,
+        ]);
+        assert_eq!(app.display_value(), "20");
+    }
+
+    //
+    // Answer recall
+    //
+
+    #[test]
+    fn answer_recall() {
+        let app = run_app(&[
+            // 2 + 3 = 5
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+            // 9 - Ans =
+            Message::Digit('9'),
+            Message::Operator(Operator::Subtract),
+            Message::Answer,
+            Message::Equals,
+        ]);
+        assert_eq!(app.display_value(), "4");
+    }
+
+    #[test]
+    fn answer_with_no_prior_result() {
+        // Ans before any computation should not change the display
+        let app = run_app(&[Message::Answer]);
+        assert_eq!(app.display_value(), "");
+    }
+
+    //
+    // Equals with no pending operation
+    //
+
+    #[test]
+    fn equals_with_no_pending_op_is_noop() {
+        let app = run_app(&[Message::Digit('5'), Message::Equals]);
+        assert_eq!(app.display_value(), "5");
+    }
+
+    //
+    // Error state
+    //
+
+    #[test]
+    fn error_state_ignores_input_until_clear() {
+        let mut app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('0'),
+            Message::Equals,
+        ]);
+        assert_eq!(app.display_value(), "Error");
+
+        // Further input should be ignored
+        app.update(Message::Digit('5'));
+        assert_eq!(app.display_value(), "Error");
+
+        // Clear should recover
+        app.update(Message::Clear);
+        assert_eq!(app.display_value(), "");
+    }
+
+    //
+    // Exact rational arithmetic
+    //
+
+    #[test]
+    fn exact_multiplication_avoids_floating_point_error() {
+        assert_eq!(simple_binop("0.1", Operator::Multiply, "10"), "1");
+    }
+
+    #[test]
+    fn exact_division_preserves_fractions() {
+        // 1 / 7 × 7 should be exactly 1 (not 0.999...)
+        let app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('7'),
+            Message::Operator(Operator::Multiply),
+            Message::Digit('7'),
+            Message::Equals,
+        ]);
+        assert_eq!(app.display_value(), "1");
+    }
+
+    //
+    // Negate result with pending operation (no history entry)
+    //
+
+    #[test]
+    fn negate_result_with_pending_does_not_add_history() {
+        // 3 + 4 = 7, negate to -7. Negate on result with no pending adds history.
+        let app = run_app(&[
+            Message::Digit('3'),
+            Message::Operator(Operator::Add),
+            Message::Digit('4'),
+            Message::Equals,
+            Message::Negate,
+        ]);
+        // Should have 2 history entries: the original "3+4 =" and the "−(7) ="
+        assert_eq!(app.history.len(), 2);
+
+        // Now test: if there's a pending op, negate should NOT add history
+        let app2 = run_app(&[
+            Message::Digit('3'),
+            Message::Operator(Operator::Add),
+            Message::Digit('4'),
+            Message::Equals,
+            Message::Operator(Operator::Add),
+            Message::Negate,
+        ]);
+        // Only 1 history entry: the original "3+4 ="
+        assert_eq!(app2.history.len(), 1);
+    }
+
+    //
+    // History
+    //
+
+    #[test]
+    fn history_entry_added_on_evaluate() {
+        let app = run_app(&[
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+        ]);
+        assert_eq!(app.history.len(), 1);
+        assert_eq!(app.history.front().unwrap().result, "5");
+    }
+
+    #[test]
+    fn history_respects_max_visible_limit() {
+        let mut app = App::default();
+        for _ in 0..MAX_VISIBLE_HISTORY + 5 {
+            for &msg in &[
+                Message::Digit('1'),
+                Message::Operator(Operator::Add),
+                Message::Digit('1'),
+                Message::Equals,
+                Message::Clear,
+            ] {
+                app.update(msg);
+            }
+        }
+        assert_eq!(app.history.len(), MAX_VISIBLE_HISTORY);
+    }
+}
