@@ -208,6 +208,10 @@ impl App {
     }
 
     fn input_digit(&mut self, c: char) {
+        if !c.is_ascii_digit() {
+            return;
+        }
+
         self.ensure_editing();
 
         if let DisplayState::Editing(value) = &mut self.display {
