@@ -451,10 +451,9 @@ impl App {
     }
 }
 
-// TODO: This is a placeholder. We need to support a max digit limit and add visually distinct rounding, as well as
-// use the correct unicode minus sign.
+// TODO: This is a placeholder. We need to support a max digit limit and add visually distinct rounding
 fn format_rational(value: &BigRational) -> String {
-    value.to_dec_string()
+    value.to_dec_string().replacen('-', "\u{2212}", 1)
 }
 
 /// Launches the Exactulator GUI application.
