@@ -1,9 +1,5 @@
 # Exactulator TODO
 
-## Immediate Tasks
-
-- Update README
-
 ## Features
 
 This is a potential list of features. There is no guarantee that any of them will
