@@ -6,6 +6,7 @@ use std::fmt;
 
 use big_rational_str::BigRationalExt as _;
 use iced::alignment::{Horizontal, Vertical};
+use iced::keyboard;
 use iced::widget::{Column, button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Font, Subscription, Theme};
 use num::{BigRational, Zero as _};
@@ -40,6 +41,7 @@ enum MathError {
 #[derive(Debug, Clone, Copy)]
 enum Message {
     Answer,
+    Backspace,
     Clear,
     ClearEntry,
     Decimal,
@@ -119,6 +121,12 @@ impl App {
             }
             Operator::Multiply => Ok(left * right),
             Operator::Subtract => Ok(left - right),
+        }
+    }
+
+    fn backspace(&mut self) {
+        if let DisplayState::Editing(value) = &mut self.display {
+            value.pop();
         }
     }
 
@@ -277,7 +285,44 @@ impl App {
 
     #[expect(clippy::unused_self)]
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::none()
+        keyboard::listen().filter_map(|event| {
+            let keyboard::Event::KeyPressed {
+                modified_key,
+                repeat: false,
+                ..
+            } = event
+            else {
+                return None;
+            };
+
+            match modified_key.as_ref() {
+                keyboard::Key::Character("0") => Some(Message::Digit('0')),
+                keyboard::Key::Character("1") => Some(Message::Digit('1')),
+                keyboard::Key::Character("2") => Some(Message::Digit('2')),
+                keyboard::Key::Character("3") => Some(Message::Digit('3')),
+                keyboard::Key::Character("4") => Some(Message::Digit('4')),
+                keyboard::Key::Character("5") => Some(Message::Digit('5')),
+                keyboard::Key::Character("6") => Some(Message::Digit('6')),
+                keyboard::Key::Character("7") => Some(Message::Digit('7')),
+                keyboard::Key::Character("8") => Some(Message::Digit('8')),
+                keyboard::Key::Character("9") => Some(Message::Digit('9')),
+                keyboard::Key::Character("+") => Some(Message::Operator(Operator::Add)),
+                keyboard::Key::Character("-") => Some(Message::Operator(Operator::Subtract)),
+                keyboard::Key::Character("*") => Some(Message::Operator(Operator::Multiply)),
+                keyboard::Key::Character("/") => Some(Message::Operator(Operator::Divide)),
+                keyboard::Key::Character(".") => Some(Message::Decimal),
+                keyboard::Key::Character("=")
+                | keyboard::Key::Named(keyboard::key::Named::Enter) => Some(Message::Equals),
+                keyboard::Key::Character("x") => Some(Message::Answer),
+                keyboard::Key::Named(keyboard::key::Named::Backspace) => Some(Message::Backspace),
+                keyboard::Key::Named(keyboard::key::Named::Escape) => Some(Message::Clear),
+                keyboard::Key::Named(keyboard::key::Named::Delete) => Some(Message::ClearEntry),
+                keyboard::Key::Named(keyboard::key::Named::F9) => Some(Message::Negate),
+                keyboard::Key::Named(_)
+                | keyboard::Key::Character(_)
+                | keyboard::Key::Unidentified => None,
+            }
+        })
     }
 
     #[expect(clippy::unused_self)]
@@ -292,6 +337,7 @@ impl App {
 
         match message {
             Message::Answer => self.answer(),
+            Message::Backspace => self.backspace(),
             Message::Clear => self.clear(),
             Message::ClearEntry => self.clear_entry(),
             Message::Digit(c) => self.input_digit(c),
@@ -754,6 +800,63 @@ mod tests {
             Message::ClearEntry,
         ]);
         assert_eq!(app.display_value(), "");
+    }
+
+    //
+    // Backspace
+    //
+
+    #[test]
+    fn backspace_removes_last_digit() {
+        let msgs = vec![
+            Message::Digit('1'),
+            Message::Digit('2'),
+            Message::Digit('3'),
+            Message::Backspace,
+        ];
+        assert_eq!(eval(&msgs), "12");
+    }
+
+    #[test]
+    fn backspace_on_empty_is_noop() {
+        let msgs = vec![Message::Backspace];
+        assert_eq!(eval(&msgs), "");
+    }
+
+    #[test]
+    fn backspace_on_result_is_noop() {
+        let app = run_app(&[
+            Message::Digit('2'),
+            Message::Operator(Operator::Add),
+            Message::Digit('3'),
+            Message::Equals,
+            Message::Backspace,
+        ]);
+        assert_eq!(app.display_value(), "5");
+    }
+
+    #[test]
+    fn backspace_removes_decimal_point() {
+        let msgs = vec![Message::Digit('1'), Message::Decimal, Message::Backspace];
+        assert_eq!(eval(&msgs), "1");
+    }
+
+    #[test]
+    fn backspace_on_negated_removes_last_char() {
+        let msgs = vec![
+            Message::Digit('1'),
+            Message::Digit('2'),
+            Message::Negate,
+            Message::Backspace,
+        ];
+        // "-12" → backspace → "-1"
+        assert_eq!(eval(&msgs), "\u{2212}1");
+    }
+
+    #[test]
+    fn backspace_all_digits_leaves_empty() {
+        let msgs = vec![Message::Digit('5'), Message::Backspace];
+        assert_eq!(eval(&msgs), "");
     }
 
     //

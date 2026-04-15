@@ -2,7 +2,6 @@
 
 ## Immediate Tasks
 
-- Add tests
 - Update README
 
 ## Features
@@ -12,11 +11,7 @@ be implemented, and some of them may in fact be undesirable or infeasible.
 
 ### High Value, Low Complexity
 
-- **Keyboard input** — The `subscription` method exists but returns `Subscription::none()`.
-  Adding keyboard support for digits, operators, Enter, Escape, and Backspace would
-  make the app dramatically more usable.
-- **Backspace/delete** — No way to correct a mistyped digit without clearing the
-  entire entry. A delete button in the UI would also be useful.
+- **Backspace** — Keyboard is available, but a button would also be useful.
 - **Result display formatting** — Truncate long decimals, show a rounding indicator
   (e.g. `≈`), and use the Unicode minus sign. Critical for usability with rational
   results like `1/3`. Probably needs a `HistoryEntry` refactor as well.
@@ -25,6 +20,8 @@ be implemented, and some of them may in fact be undesirable or infeasible.
 
 ### High Value, Medium Complexity
 
+- **Repeat operation** - Repeatedly pressing enter/equals should repeat the last
+  operation.
 - **Parentheses / expression chain** — Currently only single pending operations
   are supported (`2 + 3 × 4` evaluates left-to-right). Proper operator precedence
   would be a big improvement.
