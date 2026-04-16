@@ -50,6 +50,7 @@ be implemented, and some of them may in fact be undesirable or infeasible.
   to cm).
 - **Variable/memory slots** — Named variables or M+/M-/MR memory registers.
 - **Undo/redo** — State history with Ctrl+Z / Ctrl+Y support.
+- **Automatic builds** - Automatically generate build artifacts on GitHub.
 
 ### Lower Priority
 

@@ -9,8 +9,9 @@ use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard;
 use iced::widget::{Column, button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Font, Subscription, Theme};
-use num::{BigRational, Zero as _};
-use thiserror::Error;
+use num::BigRational;
+
+use crate::engine::{DisplayState, Operator, PendingOperation, apply_operator};
 
 const BUTTON_FONT_SIZE: f32 = 22.0;
 const BUTTON_PADDING: f32 = 16.0;
@@ -32,12 +33,6 @@ struct HistoryEntry {
     result: String,
 }
 
-#[derive(Debug, Error)]
-enum MathError {
-    #[error("division by zero")]
-    DivisionByZero,
-}
-
 #[derive(Debug, Clone, Copy)]
 enum Message {
     Answer,
@@ -51,14 +46,6 @@ enum Message {
     Operator(Operator),
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum Operator {
-    Add,
-    Divide,
-    Multiply,
-    Subtract,
-}
-
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -68,25 +55,6 @@ impl fmt::Display for Operator {
             Self::Subtract => write!(f, "−"),
         }
     }
-}
-
-#[derive(Debug)]
-enum DisplayState {
-    Editing(String),
-    Error,
-    Result(BigRational),
-}
-
-impl Default for DisplayState {
-    fn default() -> Self {
-        Self::Editing(String::new())
-    }
-}
-
-#[derive(Debug)]
-struct PendingOperation {
-    left: BigRational,
-    operator: Operator,
 }
 
 #[derive(Default)]
@@ -102,25 +70,6 @@ impl App {
     fn answer(&mut self) {
         if let Some(result) = &self.last_result {
             self.display = DisplayState::Result(result.clone());
-        }
-    }
-
-    fn apply_operator(
-        left: BigRational,
-        op: Operator,
-        right: BigRational,
-    ) -> Result<BigRational, MathError> {
-        match op {
-            Operator::Add => Ok(left + right),
-            Operator::Divide => {
-                if right.is_zero() {
-                    Err(MathError::DivisionByZero)
-                } else {
-                    Ok(left / right)
-                }
-            }
-            Operator::Multiply => Ok(left * right),
-            Operator::Subtract => Ok(left - right),
         }
     }
 
@@ -173,7 +122,7 @@ impl App {
             let right = self.current_value();
             let expression = format!("{}{} =", self.last_expression, format_rational(&right));
 
-            let result = Self::apply_operator(pending.left.clone(), pending.operator, right);
+            let result = apply_operator(pending.left.clone(), pending.operator, right);
 
             let result_str = if let Ok(result_value) = &result {
                 let result_str = format_rational(result_value);
@@ -621,7 +570,7 @@ mod tests {
         ];
 
         for &(l, op, r, expected) in cases {
-            let result = App::apply_operator(rational(l, 1), op, rational(r, 1));
+            let result = apply_operator(rational(l, 1), op, rational(r, 1));
             match expected {
                 Some((num, den)) => {
                     assert_eq!(
@@ -637,7 +586,7 @@ mod tests {
 
     #[test]
     fn apply_operator_exact_fraction_addition() {
-        let result = App::apply_operator(rational(1, 3), Operator::Add, rational(1, 6)).unwrap();
+        let result = apply_operator(rational(1, 3), Operator::Add, rational(1, 6)).unwrap();
         assert_eq!(result, rational(1, 2));
     }
 
