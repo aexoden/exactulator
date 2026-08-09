@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // SPDX-FileCopyrightText: 2026 Jason Lynch <jason@aexoden.com>
 
+use big_rational_str::BigRationalExt as _;
 use num::{BigRational, Zero as _};
 use thiserror::Error;
 
@@ -19,7 +20,7 @@ impl Default for DisplayState {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Eq, PartialEq, Error)]
 pub enum MathError {
     #[error("division by zero")]
     DivisionByZero,
@@ -63,4 +64,12 @@ pub fn apply_operator(
         Operator::Multiply => Ok(left * right),
         Operator::Subtract => Ok(left - right),
     }
+}
+
+/// Parses a decimal string into a `BigRational`.
+///
+/// Input that is empty or otherwise unparseable yields zero.
+#[must_use]
+pub fn parse_decimal(value: &str) -> BigRational {
+    BigRational::from_dec_str(value).unwrap_or_else(|_| BigRational::from_integer(0.into()))
 }

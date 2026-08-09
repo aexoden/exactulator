@@ -11,7 +11,7 @@ use iced::widget::{Column, button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Font, Subscription, Theme};
 use num::BigRational;
 
-use crate::engine::{DisplayState, Operator, PendingOperation, apply_operator};
+use crate::engine::{DisplayState, Operator, PendingOperation, apply_operator, parse_decimal};
 
 const BUTTON_FONT_SIZE: f32 = 22.0;
 const BUTTON_PADDING: f32 = 16.0;
@@ -96,8 +96,7 @@ impl App {
 
     fn current_value(&self) -> BigRational {
         match &self.display {
-            DisplayState::Editing(value) => BigRational::from_dec_str(value)
-                .unwrap_or_else(|_| BigRational::from_integer(0.into())),
+            DisplayState::Editing(value) => parse_decimal(value),
             DisplayState::Error => BigRational::from_integer(0.into()),
             DisplayState::Result(value) => value.clone(),
         }
