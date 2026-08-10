@@ -2,4 +2,5 @@
 // SPDX-FileCopyrightText: 2026 Jason Lynch <jason@aexoden.com>
 
 pub mod engine;
+pub mod format;
 pub mod gui;
