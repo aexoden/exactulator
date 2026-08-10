@@ -4,7 +4,6 @@
 use std::collections::VecDeque;
 use std::fmt;
 
-use big_rational_str::BigRationalExt as _;
 use iced::alignment::{Horizontal, Vertical};
 use iced::keyboard;
 use iced::widget::{Column, button, column, container, row, scrollable, text};
@@ -12,6 +11,10 @@ use iced::{Background, Border, Color, Element, Fill, Font, Subscription, Theme};
 use num::BigRational;
 
 use crate::engine::{DisplayState, Operator, PendingOperation, apply_operator, parse_decimal};
+use crate::format::FormattedRational;
+
+/// Prefix marking a rendered value as a rounded approximation.
+const APPROXIMATION_MARKER: &str = "\u{2248}";
 
 const BUTTON_FONT_SIZE: f32 = 22.0;
 const BUTTON_PADDING: f32 = 16.0;
@@ -27,10 +30,35 @@ const HISTORY_BACKGROUND: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.15);
 const RESULT_TEXT_COLOR: [f32; 3] = [0.8, 0.8, 0.85];
 const EXPRESSION_TEXT_COLOR: [f32; 3] = [0.6, 0.6, 0.65];
 
+/// A value ready to be drawn, along with whether it needs the approximation marker.
+#[derive(Debug, Clone, Eq, PartialEq)]
+struct DisplayValue {
+    is_approximate: bool,
+    text: String,
+}
+
+impl DisplayValue {
+    const fn exact(text: String) -> Self {
+        Self {
+            is_approximate: false,
+            text,
+        }
+    }
+}
+
+impl From<FormattedRational> for DisplayValue {
+    fn from(value: FormattedRational) -> Self {
+        Self {
+            is_approximate: value.is_approximate,
+            text: value.text,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct HistoryEntry {
     expression: String,
-    result: String,
+    result: DisplayValue,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -102,11 +130,13 @@ impl App {
         }
     }
 
-    fn display_value(&self) -> String {
+    fn display_value(&self) -> DisplayValue {
         match &self.display {
-            DisplayState::Editing(value) => value.clone().replacen('-', "\u{2212}", 1),
-            DisplayState::Error => "Error".to_owned(),
-            DisplayState::Result(value) => format_rational(value),
+            DisplayState::Editing(value) => {
+                DisplayValue::exact(value.clone().replacen('-', "\u{2212}", 1))
+            }
+            DisplayState::Error => DisplayValue::exact("Error".to_owned()),
+            DisplayState::Result(value) => FormattedRational::new(value).into(),
         }
     }
 
@@ -119,25 +149,24 @@ impl App {
     fn evaluate(&mut self) {
         if let Some(pending) = &self.pending {
             let right = self.current_value();
-            let expression = format!("{}{} =", self.last_expression, format_rational(&right));
+            let expression = format!("{}{} =", self.last_expression, format_operand(&right));
 
             let result = apply_operator(pending.left.clone(), pending.operator, right);
 
-            let result_str = if let Ok(result_value) = &result {
-                let result_str = format_rational(result_value);
-                self.display = DisplayState::Result(result_value.clone());
-                self.last_result = Some(result_value.clone());
+            let result_value = if let Ok(value) = &result {
+                self.display = DisplayState::Result(value.clone());
+                self.last_result = Some(value.clone());
 
-                result_str
+                FormattedRational::new(value).into()
             } else {
                 self.display = DisplayState::Error;
 
-                String::from("Error")
+                DisplayValue::exact("Error".to_owned())
             };
 
             self.history.push_back(HistoryEntry {
                 expression: expression.clone(),
-                result: result_str,
+                result: result_value,
             });
 
             if self.history.len() > MAX_VISIBLE_HISTORY {
@@ -183,7 +212,7 @@ impl App {
         if let Some(pending) = &mut self.pending {
             if matches!(&self.display, DisplayState::Editing(v) if v.is_empty()) {
                 pending.operator = op;
-                self.last_expression = format!("{} {op} ", format_rational(&pending.left));
+                self.last_expression = format!("{} {op} ", format_operand(&pending.left));
                 return;
             }
 
@@ -191,7 +220,7 @@ impl App {
         }
 
         let current = self.current_value();
-        self.last_expression = format!("{} {op} ", format_rational(&current));
+        self.last_expression = format!("{} {op} ", format_operand(&current));
         self.pending = Some(PendingOperation {
             left: current,
             operator: op,
@@ -205,12 +234,11 @@ impl App {
             let negated_value = -value.clone();
 
             if self.pending.is_none() {
-                let result_str = format_rational(&negated_value);
-                let expression = format!("\u{2212}({}) =", format_rational(value));
+                let expression = format!("\u{2212}({}) =", format_operand(value));
 
                 self.history.push_back(HistoryEntry {
                     expression: expression.clone(),
-                    result: result_str,
+                    result: FormattedRational::new(&negated_value).into(),
                 });
 
                 if self.history.len() > MAX_VISIBLE_HISTORY {
@@ -316,17 +344,23 @@ impl App {
             .width(Fill)
             .align_x(Horizontal::Right);
 
-        let display_text = container(
-            scrollable(
-                text(self.display_value())
-                    .size(DISPLAY_RESULT_FONT_SIZE)
-                    .font(Font::MONOSPACE)
-                    .color(RESULT_TEXT_COLOR),
-            )
-            .horizontal()
-            .anchor_right()
-            .spacing(4),
+        let value = self.display_value();
+
+        let digits = scrollable(
+            text(value.text)
+                .size(DISPLAY_RESULT_FONT_SIZE)
+                .font(Font::MONOSPACE)
+                .color(RESULT_TEXT_COLOR),
         )
+        .horizontal()
+        .anchor_right()
+        .spacing(4);
+
+        let display_text = container(view_value(
+            digits.into(),
+            value.is_approximate,
+            DISPLAY_RESULT_FONT_SIZE,
+        ))
         .align_right(Fill)
         .height(60.0);
 
@@ -352,13 +386,17 @@ impl App {
                         .width(Fill)
                         .align_x(Horizontal::Right)
                         .into(),
-                    text(&entry.result)
-                        .size(HISTORY_RESULT_FONT_SIZE)
-                        .font(Font::MONOSPACE)
-                        .color(RESULT_TEXT_COLOR)
-                        .width(Fill)
-                        .align_x(Horizontal::Right)
-                        .into(),
+                    container(view_value(
+                        text(&entry.result.text)
+                            .size(HISTORY_RESULT_FONT_SIZE)
+                            .font(Font::MONOSPACE)
+                            .color(RESULT_TEXT_COLOR)
+                            .into(),
+                        entry.result.is_approximate,
+                        HISTORY_RESULT_FONT_SIZE,
+                    ))
+                    .align_right(Fill)
+                    .into(),
                 ]
             })
             .collect();
@@ -445,9 +483,17 @@ impl App {
     }
 }
 
-// TODO: This is a placeholder. We need to support a max digit limit and add visually distinct rounding
-fn format_rational(value: &BigRational) -> String {
-    value.to_dec_string().replacen('-', "\u{2212}", 1)
+/// Renders a rational for inclusion in an expression line.
+///
+/// Unlike [`view_value`], the approximation marker is folded into the rendered value.
+fn format_operand(value: &BigRational) -> String {
+    let formatted = FormattedRational::new(value);
+
+    if formatted.is_approximate {
+        format!("{APPROXIMATION_MARKER}{}", formatted.text)
+    } else {
+        formatted.text
+    }
 }
 
 /// Launches the Exactulator GUI application.
@@ -478,6 +524,24 @@ pub fn run() -> iced::Result {
         .run()
 }
 
+/// Renders a value at the given font size, prefixing approximations with a dimmer marker.
+fn view_value(
+    digits: Element<'_, Message>,
+    is_approximate: bool,
+    size: f32,
+) -> Element<'_, Message> {
+    if is_approximate {
+        let marker = text(APPROXIMATION_MARKER)
+            .size(size)
+            .font(Font::MONOSPACE)
+            .color(EXPRESSION_TEXT_COLOR);
+
+        row![marker, digits].align_y(Vertical::Top).into()
+    } else {
+        digits
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,9 +570,9 @@ mod tests {
         app
     }
 
-    /// Runs a sequence of messages and returns the display string.
+    /// Runs a sequence of messages and returns the display text.
     fn eval(messages: &[Message]) -> String {
-        run_app(messages).display_value()
+        run_app(messages).display_value().text
     }
 
     /// Builds a binary operation (left op right =) and returns the display string.
@@ -525,29 +589,87 @@ mod tests {
     }
 
     //
-    // format_rational
+    // Display formatting
     //
 
     #[test]
-    fn format_rational_zero() {
-        assert_eq!(format_rational(&rational(0, 1)), "0");
+    fn display_value_of_a_result_is_exactly_formatted() {
+        let app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('3'),
+            Message::Equals,
+        ]);
+
+        assert_eq!(
+            app.display_value(),
+            DisplayValue {
+                is_approximate: false,
+                text: "0.(3)".to_owned(),
+            }
+        );
     }
 
     #[test]
-    fn format_rational_integer() {
-        assert_eq!(format_rational(&rational(42, 1)), "42");
+    fn display_value_flags_a_rounded_result() {
+        // 1/17 has a period of 16, past the default `max_digits`, so it can only be rounded.
+        let app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('1'),
+            Message::Digit('7'),
+            Message::Equals,
+        ]);
+
+        assert_eq!(
+            app.display_value(),
+            DisplayValue {
+                is_approximate: true,
+                text: "0.058823529412".to_owned(),
+            }
+        );
     }
 
     #[test]
-    fn format_rational_negative_integer() {
-        assert_eq!(format_rational(&rational(-7, 1)), "\u{2212}7");
+    fn display_value_of_an_exact_result_is_not_flagged() {
+        // The bulk of the suite asserts on display text alone, so cover the negative
+        // case for the flag explicitly: exact results must not be marked approximate.
+        let cases: &[(&str, Operator, &str)] = &[
+            ("2", Operator::Add, "3"),
+            ("1", Operator::Divide, "4"),
+            // 1/4096 terminates at exactly the digit budget.
+            ("1", Operator::Divide, "4096"),
+            ("1", Operator::Divide, "3"),
+        ];
+
+        for &(left, op, right) in cases {
+            let mut msgs = input(left);
+            msgs.push(Message::Operator(op));
+            msgs.extend(input(right));
+            msgs.push(Message::Equals);
+
+            let value = run_app(&msgs).display_value();
+
+            assert!(
+                !value.is_approximate,
+                "{left} {op} {right} is exact but rendered as {}{}",
+                APPROXIMATION_MARKER, value.text
+            );
+        }
     }
 
-    // TODO: Update this test once repeating decimal format is determined
     #[test]
-    fn format_rational_repeating_fraction() {
-        let s = format_rational(&rational(1, 3));
-        assert!(s.starts_with("0."), "expected decimal, got {s}");
+    fn display_value_of_in_progress_input_is_never_approximate() {
+        let app = run_app(&input("1.5"));
+
+        assert_eq!(app.display_value(), DisplayValue::exact("1.5".to_owned()));
+    }
+
+    #[test]
+    fn format_operand_marks_approximations_inline() {
+        assert_eq!(format_operand(&rational(1, 3)), "0.(3)");
+        assert_eq!(format_operand(&rational(-7, 1)), "\u{2212}7");
+        assert_eq!(format_operand(&rational(1, 17)), "\u{2248}0.058823529412");
     }
 
     //
@@ -625,12 +747,10 @@ mod tests {
         assert_eq!(eval(&msgs), "\u{2212}10");
     }
 
-    // TODO: This test should be updated once we determine the behavior for repeating decimals
     #[test]
     fn division_repeating() {
-        let result = simple_binop("1", Operator::Divide, "3");
-        assert!(result.starts_with("0."), "expected decimal, got {result}");
-        assert!(result.contains('3'), "expected repeating 3s, got {result}");
+        assert_eq!(simple_binop("1", Operator::Divide, "3"), "0.(3)");
+        assert_eq!(simple_binop("5", Operator::Divide, "12"), "0.41(6)");
     }
 
     //
@@ -747,7 +867,7 @@ mod tests {
             Message::Equals,
             Message::ClearEntry,
         ]);
-        assert_eq!(app.display_value(), "");
+        assert_eq!(app.display_value().text, "");
     }
 
     //
@@ -780,7 +900,7 @@ mod tests {
             Message::Equals,
             Message::Backspace,
         ]);
-        assert_eq!(app.display_value(), "5");
+        assert_eq!(app.display_value().text, "5");
     }
 
     #[test]
@@ -862,7 +982,7 @@ mod tests {
             Message::Digit('4'),
             Message::Equals,
         ]);
-        assert_eq!(app.display_value(), "20");
+        assert_eq!(app.display_value().text, "20");
     }
 
     //
@@ -883,14 +1003,14 @@ mod tests {
             Message::Answer,
             Message::Equals,
         ]);
-        assert_eq!(app.display_value(), "4");
+        assert_eq!(app.display_value().text, "4");
     }
 
     #[test]
     fn answer_with_no_prior_result() {
         // Ans before any computation should not change the display
         let app = run_app(&[Message::Answer]);
-        assert_eq!(app.display_value(), "");
+        assert_eq!(app.display_value().text, "");
     }
 
     //
@@ -900,7 +1020,7 @@ mod tests {
     #[test]
     fn equals_with_no_pending_op_is_noop() {
         let app = run_app(&[Message::Digit('5'), Message::Equals]);
-        assert_eq!(app.display_value(), "5");
+        assert_eq!(app.display_value().text, "5");
     }
 
     //
@@ -915,15 +1035,15 @@ mod tests {
             Message::Digit('0'),
             Message::Equals,
         ]);
-        assert_eq!(app.display_value(), "Error");
+        assert_eq!(app.display_value().text, "Error");
 
         // Further input should be ignored
         app.update(Message::Digit('5'));
-        assert_eq!(app.display_value(), "Error");
+        assert_eq!(app.display_value().text, "Error");
 
         // Clear should recover
         app.update(Message::Clear);
-        assert_eq!(app.display_value(), "");
+        assert_eq!(app.display_value().text, "");
     }
 
     //
@@ -946,7 +1066,7 @@ mod tests {
             Message::Digit('7'),
             Message::Equals,
         ]);
-        assert_eq!(app.display_value(), "1");
+        assert_eq!(app.display_value().text, "1");
     }
 
     //
@@ -992,7 +1112,29 @@ mod tests {
             Message::Equals,
         ]);
         assert_eq!(app.history.len(), 1);
-        assert_eq!(app.history.front().unwrap().result, "5");
+        assert_eq!(
+            app.history.front().unwrap().result,
+            DisplayValue::exact("5".to_owned())
+        );
+    }
+
+    #[test]
+    fn history_entry_records_the_approximation_flag() {
+        let app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('1'),
+            Message::Digit('7'),
+            Message::Equals,
+        ]);
+
+        assert_eq!(
+            app.history.front().unwrap().result,
+            DisplayValue {
+                is_approximate: true,
+                text: "0.058823529412".to_owned(),
+            }
+        );
     }
 
     #[test]
