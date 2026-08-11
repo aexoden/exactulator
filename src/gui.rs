@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 // SPDX-FileCopyrightText: 2026 Jason Lynch <jason@aexoden.com>
 
-use std::collections::VecDeque;
 use std::fmt;
 
 use iced::alignment::{Horizontal, Vertical};
@@ -10,7 +9,10 @@ use iced::widget::{Column, button, column, container, row, scrollable, text};
 use iced::{Background, Border, Color, Element, Fill, Font, Subscription, Theme};
 use num::BigRational;
 
-use crate::engine::{DisplayState, Operator, PendingOperation, apply_operator, parse_decimal};
+use crate::engine::{
+    DisplayState, History, HistoryEntry, Operator, PendingOperation, UnaryOperator, apply_operator,
+    parse_decimal,
+};
 use crate::format::FormattedRational;
 
 /// Prefix marking a rendered value as a rounded approximation.
@@ -23,7 +25,6 @@ const DISPLAY_RESULT_FONT_SIZE: f32 = 36.0;
 const HISTORY_EXPRESSION_FONT_SIZE: f32 = 14.0;
 const HISTORY_RESULT_FONT_SIZE: f32 = 16.0;
 const KEYPAD_HEIGHT: f32 = 280.0;
-const MAX_VISIBLE_HISTORY: usize = 50;
 const SPACING: f32 = 4.0;
 
 const HISTORY_BACKGROUND: Color = Color::from_rgba(0.0, 0.0, 0.0, 0.15);
@@ -55,12 +56,6 @@ impl From<FormattedRational> for DisplayValue {
     }
 }
 
-#[derive(Debug, Clone)]
-struct HistoryEntry {
-    expression: String,
-    result: DisplayValue,
-}
-
 #[derive(Debug, Clone, Copy)]
 enum Message {
     Answer,
@@ -88,7 +83,7 @@ impl fmt::Display for Operator {
 #[derive(Default)]
 struct App {
     display: DisplayState,
-    history: VecDeque<HistoryEntry>,
+    history: History,
     last_expression: String,
     last_result: Option<BigRational>,
     pending: Option<PendingOperation>,
@@ -147,35 +142,29 @@ impl App {
     }
 
     fn evaluate(&mut self) {
-        if let Some(pending) = &self.pending {
-            let right = self.current_value();
-            let expression = format!("{}{} =", self.last_expression, format_operand(&right));
+        let Some(pending) = self.pending.take() else {
+            return;
+        };
 
-            let result = apply_operator(pending.left.clone(), pending.operator, right);
+        let right = self.current_value();
+        let result = apply_operator(pending.left.clone(), pending.operator, right.clone());
 
-            let result_value = if let Ok(value) = &result {
-                self.display = DisplayState::Result(value.clone());
-                self.last_result = Some(value.clone());
-
-                FormattedRational::new(value).into()
-            } else {
-                self.display = DisplayState::Error;
-
-                DisplayValue::exact("Error".to_owned())
-            };
-
-            self.history.push_back(HistoryEntry {
-                expression: expression.clone(),
-                result: result_value,
-            });
-
-            if self.history.len() > MAX_VISIBLE_HISTORY {
-                self.history.pop_front();
-            }
-
-            self.last_expression = expression;
-            self.pending = None;
+        if let Ok(value) = &result {
+            self.display = DisplayState::Result(value.clone());
+            self.last_result = Some(value.clone());
+        } else {
+            self.display = DisplayState::Error;
         }
+
+        let entry = HistoryEntry::Binary {
+            left: pending.left,
+            operator: pending.operator,
+            result,
+            right,
+        };
+
+        self.last_expression = format_entry_expression(&entry);
+        self.history.push(entry);
     }
 
     fn input_decimal(&mut self) {
@@ -230,33 +219,36 @@ impl App {
     }
 
     fn negate(&mut self) {
-        if let DisplayState::Result(value) = &self.display {
-            let negated_value = -value.clone();
-
-            if self.pending.is_none() {
-                let expression = format!("\u{2212}({}) =", format_operand(value));
-
-                self.history.push_back(HistoryEntry {
-                    expression: expression.clone(),
-                    result: FormattedRational::new(&negated_value).into(),
-                });
-
-                if self.history.len() > MAX_VISIBLE_HISTORY {
-                    self.history.pop_front();
-                }
-
-                self.last_expression = expression;
-                self.last_result = Some(negated_value.clone());
-            }
-
-            self.display = DisplayState::Result(negated_value);
-        } else if let DisplayState::Editing(value) = &mut self.display {
+        if let DisplayState::Editing(value) = &mut self.display {
             if let Some(stripped) = value.strip_prefix('-') {
                 *value = stripped.to_owned();
             } else if value != "0" {
                 value.insert(0, '-');
             }
+
+            return;
         }
+
+        let DisplayState::Result(value) = &self.display else {
+            return;
+        };
+
+        let operand = value.clone();
+        let negated_value = -operand.clone();
+
+        if self.pending.is_none() {
+            let entry = HistoryEntry::Unary {
+                operand,
+                operator: UnaryOperator::Negate,
+                result: Ok(negated_value.clone()),
+            };
+
+            self.last_expression = format_entry_expression(&entry);
+            self.history.push(entry);
+            self.last_result = Some(negated_value.clone());
+        }
+
+        self.display = DisplayState::Result(negated_value);
     }
 
     #[expect(clippy::unused_self)]
@@ -378,8 +370,10 @@ impl App {
             .history
             .iter()
             .flat_map(|entry| {
+                let result = format_entry_result(entry);
+
                 [
-                    text(&entry.expression)
+                    text(format_entry_expression(entry))
                         .size(HISTORY_EXPRESSION_FONT_SIZE)
                         .font(Font::MONOSPACE)
                         .color(EXPRESSION_TEXT_COLOR)
@@ -387,12 +381,12 @@ impl App {
                         .align_x(Horizontal::Right)
                         .into(),
                     container(view_value(
-                        text(&entry.result.text)
+                        text(result.text)
                             .size(HISTORY_RESULT_FONT_SIZE)
                             .font(Font::MONOSPACE)
                             .color(RESULT_TEXT_COLOR)
                             .into(),
-                        entry.result.is_approximate,
+                        result.is_approximate,
                         HISTORY_RESULT_FONT_SIZE,
                     ))
                     .align_right(Fill)
@@ -483,6 +477,39 @@ impl App {
     }
 }
 
+/// Renders a history entry's expression for display in the history panel.
+fn format_entry_expression(entry: &HistoryEntry) -> String {
+    match entry {
+        HistoryEntry::Binary {
+            left,
+            operator,
+            right,
+            ..
+        } => format!(
+            "{} {operator} {} =",
+            format_operand(left),
+            format_operand(right)
+        ),
+        HistoryEntry::Unary {
+            operand, operator, ..
+        } => match operator {
+            UnaryOperator::Negate => format!("\u{2212}({}) =", format_operand(operand)),
+        },
+    }
+}
+
+/// Renders the result or error of a history entry for display in the history panel.
+fn format_entry_result(entry: &HistoryEntry) -> DisplayValue {
+    let result = match entry {
+        HistoryEntry::Binary { result, .. } | HistoryEntry::Unary { result, .. } => result,
+    };
+
+    result.as_ref().map_or_else(
+        |_| DisplayValue::exact("Error".to_owned()),
+        |value| FormattedRational::new(value).into(),
+    )
+}
+
 /// Renders a rational for inclusion in an expression line.
 ///
 /// Unlike [`view_value`], the approximation marker is folded into the rendered value.
@@ -544,6 +571,8 @@ fn view_value(
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::{MAX_HISTORY_ENTRIES, MathError};
+
     use super::*;
 
     //
@@ -1111,36 +1140,63 @@ mod tests {
             Message::Digit('3'),
             Message::Equals,
         ]);
+
         assert_eq!(app.history.len(), 1);
         assert_eq!(
-            app.history.front().unwrap().result,
-            DisplayValue::exact("5".to_owned())
+            app.history.iter().next(),
+            Some(&HistoryEntry::Binary {
+                left: rational(2, 1),
+                operator: Operator::Add,
+                result: Ok(rational(5, 1)),
+                right: rational(3, 1),
+            })
         );
     }
 
     #[test]
-    fn history_entry_records_the_approximation_flag() {
+    fn history_entry_added_on_negate() {
         let app = run_app(&[
-            Message::Digit('1'),
+            Message::Digit('3'),
+            Message::Operator(Operator::Add),
+            Message::Digit('4'),
+            Message::Equals,
+            Message::Negate,
+        ]);
+
+        assert_eq!(
+            app.history.iter().nth(1),
+            Some(&HistoryEntry::Unary {
+                operand: rational(7, 1),
+                operator: UnaryOperator::Negate,
+                result: Ok(rational(-7, 1)),
+            })
+        );
+    }
+
+    #[test]
+    fn history_entry_records_a_failed_operation() {
+        let app = run_app(&[
+            Message::Digit('5'),
             Message::Operator(Operator::Divide),
-            Message::Digit('1'),
-            Message::Digit('7'),
+            Message::Digit('0'),
             Message::Equals,
         ]);
 
         assert_eq!(
-            app.history.front().unwrap().result,
-            DisplayValue {
-                is_approximate: true,
-                text: "0.058823529412".to_owned(),
-            }
+            app.history.iter().next(),
+            Some(&HistoryEntry::Binary {
+                left: rational(5, 1),
+                operator: Operator::Divide,
+                result: Err(MathError::DivisionByZero),
+                right: rational(0, 1),
+            })
         );
     }
 
     #[test]
-    fn history_respects_max_visible_limit() {
+    fn history_respects_max_entries() {
         let mut app = App::default();
-        for _ in 0..MAX_VISIBLE_HISTORY + 5 {
+        for _ in 0..MAX_HISTORY_ENTRIES + 5 {
             for &msg in &[
                 Message::Digit('1'),
                 Message::Operator(Operator::Add),
@@ -1151,6 +1207,78 @@ mod tests {
                 app.update(msg);
             }
         }
-        assert_eq!(app.history.len(), MAX_VISIBLE_HISTORY);
+        assert_eq!(app.history.len(), MAX_HISTORY_ENTRIES);
+    }
+
+    //
+    // History rendering
+    //
+
+    #[test]
+    fn history_entries_render_expression_and_result() {
+        let app = run_app(&[
+            Message::Digit('3'),
+            Message::Operator(Operator::Add),
+            Message::Digit('4'),
+            Message::Equals,
+            Message::Negate,
+        ]);
+
+        let rendered: Vec<(String, DisplayValue)> = app
+            .history
+            .iter()
+            .map(|entry| (format_entry_expression(entry), format_entry_result(entry)))
+            .collect();
+
+        assert_eq!(
+            rendered,
+            vec![
+                ("3 + 4 =".to_owned(), DisplayValue::exact("7".to_owned())),
+                (
+                    "\u{2212}(7) =".to_owned(),
+                    DisplayValue::exact("\u{2212}7".to_owned())
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn history_entry_renders_the_approximation_flag() {
+        let app = run_app(&[
+            Message::Digit('1'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('1'),
+            Message::Digit('7'),
+            Message::Equals,
+        ]);
+
+        let entry = app.history.iter().next().unwrap();
+
+        assert_eq!(format_entry_expression(entry), "1 \u{00f7} 17 =");
+        assert_eq!(
+            format_entry_result(entry),
+            DisplayValue {
+                is_approximate: true,
+                text: "0.058823529412".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn history_entry_renders_an_error_result() {
+        let app = run_app(&[
+            Message::Digit('5'),
+            Message::Operator(Operator::Divide),
+            Message::Digit('0'),
+            Message::Equals,
+        ]);
+
+        let entry = app.history.iter().next().unwrap();
+
+        assert_eq!(format_entry_expression(entry), "5 \u{00f7} 0 =");
+        assert_eq!(
+            format_entry_result(entry),
+            DisplayValue::exact("Error".to_owned())
+        );
     }
 }
